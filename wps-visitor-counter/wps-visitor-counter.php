@@ -1,27 +1,48 @@
 <?php
 /*
-Plugin Name: WPS Visitor Counter Plugin 
+Plugin Name: WPS Visitor Counter
 Plugin URI: https://techmix.xyz/downloads/wps-visitor-counter-plugin-for-wordpress/
 Description: WPS Visitor Counter plugin will display your websites traffic statistics at front end. This Plugin support Widget, Shortcode and Gutenberg Block.
-Version: 1.4.8
+Version: 1.4.9
+Requires at least: 5.0
+Tested up to: 6.9
+Requires PHP: 7.4
+License: GPLv2 or later
+License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Text Domain: wps-visitor-counter
 Domain Path: /languages
 Author: TechMix
 Author URI: https://techmix.xyz/
 */
-
+if ( ! defined( 'ABSPATH' ) ) exit;
 if ( ! function_exists( 'wps_getRealIpAddr' ) ) {
 	function wps_getRealIpAddr() {
-		foreach (['HTTP_CLIENT_IP', 'HTTP_X_FORWARDED_FOR', 'HTTP_X_FORWARDED', 'HTTP_X_CLUSTER_CLIENT_IP', 'HTTP_FORWARDED_FOR', 'HTTP_FORWARDED', 'REMOTE_ADDR'] as $key){
-			if(array_key_exists($key, $_SERVER) === true){
-				foreach (explode(',', $_SERVER[$key]) as $ip){
-					$ip = trim($ip); // just to be safe
-					if(filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false){
-						return $ip;
+		$ip_headers = [
+			'HTTP_CF_CONNECTING_IP', // Cloudflare
+			'HTTP_CLIENT_IP',
+			'HTTP_X_FORWARDED_FOR',
+			'HTTP_X_FORWARDED',
+			'HTTP_X_CLUSTER_CLIENT_IP',
+			'HTTP_FORWARDED_FOR',
+			'HTTP_FORWARDED',
+			'REMOTE_ADDR'
+		];
+
+		foreach ($ip_headers as $key) {
+			if (!empty($_SERVER[$key])) {
+				$raw_value = sanitize_text_field( wp_unslash( $_SERVER[ $key ] ) );
+				foreach (explode(',', $raw_value) as $ip) {
+					$ip = trim($ip);
+					// Validate IP and exclude private/reserved ranges
+					if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false) {
+						return sanitize_text_field($ip);
 					}
 				}
 			}
 		}
+
+		// Fallback
+		return sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1' ) );
 	}
 }
 
@@ -46,6 +67,21 @@ register_widget('wps_visitor_counter');
 
 function wps_visitor_counter_admin_menu() {
 	add_options_page('Plugin Stats WPS', 'WPS Visitor Counter', "manage_options", 'wps_options_general', 'wps_visitor_counter_option');
+}
+
+/**
+ * Add "Settings" link on Plugins list page.
+ */
+function wps_visitor_counter_plugin_action_links( $links ) {
+	if ( current_user_can( 'manage_options' ) ) {
+		$settings_url = admin_url( 'options-general.php?page=wps_options_general' );
+		array_unshift(
+			$links,
+			'<a href="' . esc_url( $settings_url ) . '">' . esc_html__( 'Settings', 'wps-visitor-counter' ) . '</a>'
+		);
+	}
+
+	return $links;
 }
 
 
@@ -81,9 +117,7 @@ register_activation_hook(__FILE__, 'wps_visitor_counter_activation_hook');
 register_deactivation_hook(__FILE__, 'wps_visitor_counter_deactivation_hook');
 add_action('widgets_init', 'wps_visitor_counter_widgets_init');
 add_action('admin_menu', 'wps_visitor_counter_admin_menu');
-add_action('plugins_loaded', function() {
-      load_plugin_textdomain( 'wps-visitor-counter', false, basename( dirname( __FILE__ ) ) . '/languages/' );
-    });
+add_filter( 'plugin_action_links_' . plugin_basename( __FILE__ ), 'wps_visitor_counter_plugin_action_links' );
 
 
 
@@ -93,42 +127,28 @@ add_action('plugins_loaded', function() {
 
 function wps_visitor_init() {
         add_shortcode( 'wps_visitor_counter', 'wps_add_visitor_counter' );
-        /*register_block_type( 'wps/wps-visitor-counter', array(
-        		'editor_script' => 'wps-visitor-block',
+
+        // Register Gutenberg block
+        if ( function_exists( 'register_block_type' ) ) {
+            wp_register_script(
+                'wps-visitor-gutenberg-editor-scripts',
+                esc_url( plugin_dir_url(__FILE__) . 'wps-gutenberg-block.js' ),
+                array( 'wp-blocks', 'wp-element', 'wp-editor', 'wp-components', 'wp-i18n' ),
+                '1.4.9',
+                true
+            );
+
+            register_block_type( 'wps/wps-visitor-counter', array(
+                'editor_script' => 'wps-visitor-gutenberg-editor-scripts',
                 'render_callback' => 'wps_add_visitor_counter',
-        ) );*/
-
-
-         if ( !function_exists( 'register_block_type' ) ) {
-
-		return;
-
-	}
-
-
-
-    wp_register_script(
-
-        'wps-visitor-gutenberg-editor_scripts',
-
-        plugin_dir_url(__FILE__) . 'wps-gutenberg-block.js',
-
-        array( 'wp-blocks', 'wp-components', 'wp-element', 'wp-i18n', 'wp-editor' )
-
-    );
-
-    register_block_type( 'wps/shortcode-script', array(
-
-        'editor_script' => 'wps-visitor-gutenberg-editor_scripts',
-
-    ));
-    register_block_type( 'wps/shortcodeblock', array(
-
-    'render_callback' => 'wps_add_visitor_counter'
-
-    ));
-
-    
+                'attributes' => array(
+                    'className' => array(
+                        'type' => 'string',
+                        'default' => '',
+                    ),
+                ),
+            ));
+        }
 }
 
 add_action( 'init', 'wps_visitor_init' );
